@@ -105,7 +105,7 @@ written to three nodes and fsynced; reads come from one.
 
 - **The coordinator is a single point of failure.** If it dies, reads and
   writes stop until it restarts (seconds; nothing is lost, repairs resume).
-- **PostgreSQL is the real single point of failure** — no replication or
+- **PostgreSQL is the real single point of failure** - no replication or
   backups here. Losing it loses the metadata.
 
 ## License & contact
