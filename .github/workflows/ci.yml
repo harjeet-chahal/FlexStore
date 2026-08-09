@@ -13,20 +13,29 @@ concurrency:
 
 env:
   GO_VERSION: "1.25"
+  # protoc and both plugins stamp their versions into the generated files, so
+  # the drift check only means anything if all three are pinned to whatever
+  # produced the committed output. Bumping one means regenerating and committing.
+  PROTOC_VERSION: "31.1"
+  PROTOC_GEN_GO_VERSION: "1.36.11"
+  PROTOC_GEN_GO_GRPC_VERSION: "1.5.1"
 
 permissions:
   contents: read
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Tier 1: fast feedback. Runs on every commit, finishes in a couple of minutes.
+  # ---------------------------------------------------------------------------
   build-and-test:
     name: Build, vet and unit test
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     # The metadata layer is almost entirely SQL -- transactions, partial unique
-    # indexes, triggers -- so its tests run against a real PostgreSQL. Without
-    # this they silently skip, which would hide exactly the bugs they exist to
-    # catch.
+    # indexes, triggers, window functions -- so its tests run against a real
+    # PostgreSQL. Without this they silently skip, which would hide exactly the
+    # bugs they exist to catch.
     services:
       postgres:
         image: postgres:16-alpine
@@ -72,12 +81,176 @@ jobs:
       - name: Unit tests (race detector)
         env:
           FLEXSTORE_TEST_POSTGRES_DSN: postgres://flexstore:flexstore@127.0.0.1:55432/flexstore_test?sslmode=disable
-        run: go test -race -count=1 ./...
+        run: go test -race -count=1 -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Benchmarks compile and run
+        run: |
+          go test -bench=. -benchtime=10x -run '^$' ./internal/placement/... ./internal/bufpool/...
+
+      - name: Coverage summary
+        run: go tool cover -func=coverage.out | tail -25
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+          if-no-files-found: warn
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      # v2.5.0 is pinned in the Makefile as well, so local and CI lint results
+      # cannot disagree.
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.5.0
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint shell scripts
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          # scripts/ and benchmarks/ are both operational surface: a broken
+          # benchmark script produces wrong numbers, which is worse than none.
+          shellcheck -x scripts/*.sh benchmarks/*.sh
+
+  security:
+    name: Dependency and vulnerability scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # govulncheck reports only vulnerabilities in code paths the binary
+      # actually reaches, so it does not drown the build in advisories for
+      # functions no FlexStore code calls.
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      # G115 (int -> int32 overflow) is excluded deliberately, not ignored
+      # silently: every flagged conversion here is a chunk index, part number
+      # or replica count whose value is bounded far below 2^31 by validation
+      # or by physics (disk sizes), and the rule has no way to see the bound.
+      # Annotating ~20 safe call sites with #nosec would train readers to skip
+      # the annotations that matter.
+      - name: Static analysis (gosec)
+        uses: securego/gosec@master
+        with:
+          args: -exclude-dir=gen -exclude-dir=benchmarks -exclude=G115 -severity medium ./...
+
+  proto-drift:
+    name: Generated code is up to date
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      # protoc stamps its own version into every generated file, so the
+      # compiler version is part of the output and a drift check has to pin it.
+      - name: Install protoc ${{ env.PROTOC_VERSION }}
+        run: |
+          curl -sSLo /tmp/protoc.zip \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+          sudo unzip -qo /tmp/protoc.zip -d /usr/local bin/protoc 'include/*'
+          sudo chmod +x /usr/local/bin/protoc
+          protoc --version
+      - name: Install plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v${{ env.PROTOC_GEN_GO_VERSION }}
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v${{ env.PROTOC_GEN_GO_GRPC_VERSION }}
+      - name: Regenerate
+        run: |
+          protoc -I proto \
+            --go_out=. --go_opt=module=github.com/harjeetschahal/flexstore \
+            --go-grpc_out=. --go-grpc_opt=module=github.com/harjeetschahal/flexstore \
+            proto/flexstore/v1/*.proto
+          gofmt -w gen
+      - name: Fail if gen/ drifted from proto/
+        run: git diff --exit-code gen/
+
+  docker-build:
+    name: Docker images build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        service: [gateway, coordinator, storage-node]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.service }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          build-args: SERVICE=${{ matrix.service }}
+          push: false
+          load: false
+          # Layer caching across runs: without it every integration run
+          # recompiled all three services from scratch.
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+
+  # ---------------------------------------------------------------------------
+  # Tier 2: the expensive one.
+  #
+  # Eleven containers, real node kills, real corruption, and a failure-recovery
+  # demo. It runs only after the fast jobs have passed, so a typo does not cost
+  # half an hour of runner time, and it is skipped entirely for changes that
+  # cannot affect runtime behaviour.
+  # ---------------------------------------------------------------------------
+  changes:
+    name: Detect relevant changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'cmd/**'
+              - 'internal/**'
+              - 'benchmarks/**'
+              - 'migrations/**'
+              - 'proto/**'
+              - 'gen/**'
+              - 'tests/**'
+              - 'scripts/**'
+              - 'deploy/**'
+              - 'docker-compose.yml'
+              - 'go.mod'
+              - 'go.sum'
+              - '.github/workflows/ci.yml'
 
   integration:
     name: Integration tests against a real cluster
     runs-on: ubuntu-latest
-    needs: [build-and-test]
+    needs: [build-and-test, lint, changes]
+    if: needs.changes.outputs.code == 'true'
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -129,6 +302,15 @@ jobs:
           FLEXSTORE_GATEWAY_URL: http://localhost:8080
           SIZE_MIB: "64"
         run: ./scripts/demo-failure-recovery.sh
+
+      - name: Benchmark harness runs end to end
+        env:
+          FLEXSTORE_GATEWAY_URL: http://localhost:8080
+        # A tiny profile: this proves the harness works and the driver measures a
+        # real cluster. It is NOT a performance gate -- a shared CI runner's
+        # numbers are not comparable between runs, and asserting on them would
+        # produce flaky failures that say nothing about the code.
+        run: PROFILE=quick CLIENT=host TAG=ci ./benchmarks/run.sh
 
       - name: Durability must be fully restored at the end
         run: |

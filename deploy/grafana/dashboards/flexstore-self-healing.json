@@ -1,0 +1,146 @@
+{
+  "uid": "flexstore-self-healing",
+  "title": "FlexStore — Self-Healing",
+  "tags": ["flexstore"],
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-30m", "to": "now" },
+  "editable": true,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Durability: chunks below replication factor",
+      "description": "The recovery story in one graph: a node dies, this spikes, repair drains it back to zero.",
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "flexstore-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "max(flexstore_under_replicated_chunks)", "legendFormat": "under-replicated" },
+        { "refId": "B", "expr": "max(flexstore_unavailable_chunks)", "legendFormat": "unavailable (unreadable)" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "fillOpacity": 20 } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "unavailable (unreadable)" },
+            "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Repairs in flight",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "flexstore-prometheus" },
+      "targets": [ { "refId": "A", "expr": "max(flexstore_repairs_in_flight)" } ],
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] }
+    },
+    {
+      "type": "stat",
+      "title": "Repairs failed (total)",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "flexstore-prometheus" },
+      "targets": [ { "refId": "A", "expr": "max(flexstore_repairs_failed_total) or vector(0)" } ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Replicas trimmed (total)",
+      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "flexstore-prometheus" },
+      "targets": [ { "refId": "A", "expr": "max(flexstore_replicas_trimmed_total) or vector(0)" } ],
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "purple" } }, "overrides": [] }
+    },
+    {
+      "type": "stat",
+      "title": "Durability counter drift",
+      "description": "Should always be zero.",
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "flexstore-prometheus" },
+      "targets": [ { "refId": "A", "expr": "max(flexstore_durability_counter_drift_total) or vector(0)" } ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Node health (1 healthy · 2 suspect · 3 dead)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "flexstore-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "max by (node_id) (flexstore_node_health)", "legendFormat": "{{node_id}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 3,
+          "custom": { "fillOpacity": 0, "lineWidth": 2, "stepAfter": true }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Repair queue by state",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "flexstore-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "max by (state) (flexstore_repair_jobs)", "legendFormat": "{{state}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 12 } }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Repair throughput",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 17 },
+      "datasource": { "type": "prometheus", "uid": "flexstore-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "rate(flexstore_repair_bytes_total[1m])", "legendFormat": "bytes copied" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "Bps", "custom": { "fillOpacity": 15 } }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Repairs completed",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 17 },
+      "datasource": { "type": "prometheus", "uid": "flexstore-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (result) (increase(flexstore_repairs_total[1m]))", "legendFormat": "{{result}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 12 } }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Reconciliation and corruption",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 17 },
+      "datasource": { "type": "prometheus", "uid": "flexstore-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (action) (increase(flexstore_reconcile_actions_total[5m]))", "legendFormat": "reconcile: {{action}}" },
+        { "refId": "B", "expr": "sum by (stage) (increase(flexstore_checksum_failures_total[5m]))", "legendFormat": "checksum fail: {{stage}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 12 } }, "overrides": [] }
+    }
+  ]
+}

@@ -587,6 +587,7 @@ had nothing to do with the code under test.
 | Gateway | ⚠️ stateless, but one instance in Compose | Run several behind a load balancer; nothing in the design prevents it. |
 | Redis | ✅ optional | Cluster fully functional, just more database traffic. |
 | Storage nodes | ✅ RF=3 across 5 | Survives 2 simultaneous failures for reads; repair restores durability. |
+| Prometheus / Grafana | ✅ observability only | No effect on serving. |
 
 The repair queue is *designed* for multiple coordinators — `FOR UPDATE SKIP
 LOCKED` claiming, per-instance lease ownership, lease reclamation — but only one
@@ -700,4 +701,6 @@ watch -n1 'curl -s localhost:8080/admin/replication | python3 -m json.tool'
 ```
 
 Or open the built-in dashboard at **http://localhost:8080/dashboard** and watch
-the node turn red, the repair queue drain, and durability come back.
+the node turn red, the repair queue drain, and durability come back. Grafana
+(**localhost:3000** → FlexStore → Self-Healing) shows the same recovery from
+the metrics side, with history.

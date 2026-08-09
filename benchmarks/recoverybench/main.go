@@ -261,7 +261,7 @@ func runTrial(ctx context.Context, c *http.Client, o *opts, n int) (*Trial, erro
 	// The payload is deliberately dropped before the measurement phase: at
 	// 512 MiB it would otherwise stay resident for the whole trial, competing
 	// for memory with the cluster it is meant to be observing.
-	//nolint:ineffassign,wastedassign // the assignment is the point: it frees the buffer.
+	//nolint:wastedassign // the assignment is the point: it frees the buffer.
 	payload = nil
 	_ = payload
 

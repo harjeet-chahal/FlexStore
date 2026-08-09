@@ -1,0 +1,9 @@
+# Allow `shellcheck script.sh` to follow the files a script sources
+# (benchmarks/run.sh sources benchmarks/lib.sh) without passing -x by hand.
+external-sources=true
+source-path=SCRIPTDIR
+
+# SC1007 flags `CDPATH= cd -- ...`, but clearing CDPATH for exactly that cd is
+# the point: a set CDPATH can make `cd` print the resolved path and break
+# $(...) captures.
+disable=SC1007

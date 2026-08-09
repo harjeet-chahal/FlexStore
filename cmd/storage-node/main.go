@@ -85,7 +85,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("create registrar: %w", err)
 	}
-	defer registrar.Close()
+	defer func() { _ = registrar.Close() }()
 
 	admin := observability.NewAdminServer(cfg.MetricsAddr, metrics, log, func(ctx context.Context) error {
 		if _, err := svc.Stats(); err != nil {

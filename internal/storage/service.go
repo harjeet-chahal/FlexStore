@@ -120,7 +120,7 @@ func (s *Service) ReadChunk(req *flexstorev1.ReadChunkRequest, stream flexstorev
 		}
 		return status.Errorf(codes.Internal, "open chunk: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	h := checksum.New()
 	buf := make([]byte, streamFrameSize)
@@ -200,7 +200,7 @@ func (s *Service) ReplicateChunk(ctx context.Context, req *flexstorev1.Replicate
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "dial source %s: %v", req.SourceAddress, err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	src, err := flexstorev1.NewStorageNodeServiceClient(conn).ReadChunk(ctx, &flexstorev1.ReadChunkRequest{
 		ChunkId:                req.ChunkId,

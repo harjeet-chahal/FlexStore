@@ -74,7 +74,7 @@ func run() error {
 	//                    observable including the rejections
 	//   LimitRequestBody caps what a client may send before a byte is read
 	//   Router           the handlers
-	var api http.Handler = gateway.NewRouter(handler)
+	api := gateway.NewRouter(handler)
 	api = gateway.LimitRequestBody(api, cfg.MaxObjectSize, log)
 	api = gateway.Middleware(api, log, metrics)
 

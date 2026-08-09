@@ -1,0 +1,40 @@
+# golangci-lint v2 configuration. The version here must match the pin in the
+# Makefile and .github/workflows/ci.yml (v2.5.0), because linter defaults move
+# between releases and local results must agree with CI.
+
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  # Standard set: errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+  enable:
+    - copyloopvar
+    - errname
+    - misspell
+    - nolintlint
+    - unconvert
+    - usestdlibvars
+    - wastedassign
+  exclusions:
+    generated: lax
+    paths:
+      - gen
+      # Benchmark tooling is measurement code, not product code; gosec makes
+      # the same exclusion in CI.
+      - benchmarks
+    rules:
+      # Test helpers legitimately ignore cleanup errors (deferred Close etc.).
+      - path: _test\.go
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    paths:
+      - gen

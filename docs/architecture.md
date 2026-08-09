@@ -78,10 +78,11 @@ through the control plane.
 | **PostgreSQL** | Sole source of truth for all metadata | Yes | Single instance |
 | **Redis** | Object layout cache. Optional | No — losing it costs latency, never data | Single instance |
 
-Each service also serves Prometheus-format counters on its private metrics
-port, and the gateway ships a small self-contained dashboard page at
-`/dashboard` that polls the read-only admin API. There is deliberately no
-separate observability stack to run.
+Each service serves Prometheus metrics on its private admin port. The compose
+file ships Prometheus and Grafana (two provisioned dashboards plus alert
+rules), and the gateway additionally embeds a self-contained live dashboard at
+`/dashboard` that polls the read-only admin API — so the cluster is observable
+even with the metrics stack turned off.
 
 ---
 

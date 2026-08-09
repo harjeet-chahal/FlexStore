@@ -51,7 +51,7 @@ Prerequisites: Docker with Compose. Go itself runs inside containers.
 ```bash
 git clone https://github.com/harjeet-chahal/FlexStore.git
 cd FlexStore
-make up        # gateway, coordinator, 5 storage nodes, PostgreSQL, Redis
+make up        # gateway, coordinator, 5 storage nodes, PostgreSQL, Redis, Prometheus, Grafana
 make smoke     # upload 25 MiB, download it, compare SHA-256
 ```
 
@@ -66,6 +66,11 @@ file still downloads while degraded, waits for repair and compares checksums.
 Every number it prints is queried live from the cluster. `KILL_TWO=1 make demo`
 kills two nodes.
 
+Every service also exposes Prometheus metrics; the compose file ships
+Prometheus (localhost:9091) and Grafana (localhost:3000, admin/admin) with two
+provisioned dashboards, an overview and a self-healing view of the repair
+pipeline.
+
 
 Multipart uploads (`POST /multipart/...`, parts in parallel, any order) and a
 read-only admin API (`/admin/health`, `/admin/nodes`, `/admin/replication`,
@@ -74,7 +79,7 @@ envelope with a request ID.
 
 ## Measured behaviour
 
-All measured an on one laptop (Apple M4 Pro).
+All measured on one laptop (Apple M4 Pro).
 
 **Failure recovery** (3 trials: upload 512 MiB, kill the node holding the most
 of it, measure until all chunks are back at 3 copies):

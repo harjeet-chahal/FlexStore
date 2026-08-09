@@ -22,7 +22,7 @@ func TestMiddlewareMintsAndEchoesARequestID(t *testing.T) {
 	}), testLogger(), m)
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/objects/b/k", nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/objects/b/k", nil))
 
 	if seen == "" {
 		t.Fatal("no request ID reached the handler")
@@ -39,7 +39,7 @@ func TestMiddlewareHonoursACallerSuppliedRequestID(t *testing.T) {
 		seen = observability.RequestIDFrom(r.Context())
 	}), testLogger(), m)
 
-	req := httptest.NewRequest("GET", "/objects/b/k", nil)
+	req := httptest.NewRequest(http.MethodGet, "/objects/b/k", nil)
 	req.Header.Set(requestIDHeader, "caller-supplied-id")
 	h.ServeHTTP(httptest.NewRecorder(), req)
 
@@ -59,7 +59,7 @@ func TestMiddlewareRecordsMetricsWithBoundedCardinality(t *testing.T) {
 	// Many distinct object keys must collapse onto a single metric series;
 	// labelling by raw path would blow up Prometheus cardinality.
 	for _, key := range []string{"a.bin", "b.bin", "nested/c.bin", "very/deeply/nested/d.bin"} {
-		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/objects/bucket/"+key, nil))
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/objects/bucket/"+key, nil))
 	}
 
 	count := countSeries(t, m.Registry, "flexstore_http_requests_total")
@@ -75,7 +75,7 @@ func TestMiddlewareRecordsStatusClass(t *testing.T) {
 	}), testLogger(), m)
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/objects/b/k", nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/objects/b/k", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d", rec.Code)
 	}

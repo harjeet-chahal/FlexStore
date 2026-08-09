@@ -95,7 +95,7 @@ func TestRouting(t *testing.T) {
 // makes the specified URL scheme work at all.
 func TestMultipartCompleteWinsOverKeyWildcard(t *testing.T) {
 	mux := newTestRouter(t)
-	req := httptest.NewRequest("POST", "/multipart/some-upload-id/complete", nil)
+	req := httptest.NewRequest(http.MethodPost, "/multipart/some-upload-id/complete", nil)
 	_, pattern := mux.Handler(req)
 	if pattern != "POST /multipart/{uploadId}/complete" {
 		t.Fatalf("matched %q; the literal 'complete' segment must win over {key...}", pattern)
@@ -108,7 +108,7 @@ func TestMultipartCompleteWinsOverKeyWildcard(t *testing.T) {
 // exists so the limitation is provable rather than folklore.
 func TestMultipartKeyNamedCompleteIsShadowed(t *testing.T) {
 	mux := newTestRouter(t)
-	req := httptest.NewRequest("POST", "/multipart/mybucket/complete", nil)
+	req := httptest.NewRequest(http.MethodPost, "/multipart/mybucket/complete", nil)
 	_, pattern := mux.Handler(req)
 	if pattern == "POST /multipart/{bucket}/{key...}" {
 		t.Fatal("routing changed: a key named 'complete' now reaches CreateMultipartUpload; " +
@@ -120,7 +120,7 @@ func TestUnknownRoutesAreNotSilentlySwallowed(t *testing.T) {
 	mux := newTestRouter(t)
 	// A path under /objects with the wrong method must not fall through to the
 	// catch-all "GET /" handler and return 200.
-	req := httptest.NewRequest("PATCH", "/objects/bucket/key", nil)
+	req := httptest.NewRequest(http.MethodPatch, "/objects/bucket/key", nil)
 	_, pattern := mux.Handler(req)
 	if strings.HasPrefix(pattern, "PATCH") {
 		t.Fatalf("PATCH should not be routed, matched %q", pattern)
@@ -183,7 +183,7 @@ func TestFallbacksSpeakTheErrorEnvelope(t *testing.T) {
 func TestRootReturnsServiceInfo(t *testing.T) {
 	mux := newTestRouter(t)
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET / returned %d, want 200", rec.Code)

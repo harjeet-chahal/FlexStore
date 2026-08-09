@@ -371,7 +371,7 @@ func (cs *ChunkStore) verifyFile(path string) (string, int64, error) {
 	if err != nil {
 		return "", 0, fmt.Errorf("open for verify: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	h := checksum.New()
 	n, err := io.Copy(h, f)
@@ -497,6 +497,6 @@ func fsyncDir(dir string) error {
 	if err != nil {
 		return err
 	}
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 	return d.Sync()
 }

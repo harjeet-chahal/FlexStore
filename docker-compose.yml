@@ -1,6 +1,7 @@
 # FlexStore development cluster.
 #
-#   1 gateway, 1 coordinator, 5 storage nodes, PostgreSQL, Redis.
+#   1 gateway, 1 coordinator, 5 storage nodes, PostgreSQL, Redis,
+#   Prometheus, Grafana.
 #
 # All five storage nodes run the SAME image with different configuration and
 # their own volume -- that is the point of the exercise, and it is also how a
@@ -198,8 +199,51 @@ services:
     volumes:
       - storage-node-5-data:/data
 
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=6h
+      - --web.enable-lifecycle
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    ports:
+      # 9091, not 9090: the coordinator's gRPC port already claims 9090.
+      - "127.0.0.1:${PROMETHEUS_PORT:-9091}:9090"
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD:-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Anonymous viewing is opt-in rather than on by default. It is genuinely
+      # convenient for a local demo -- open localhost:3000 and the dashboards are
+      # just there -- but "convenient for a demo" and "safe by default" point in
+      # opposite directions, and the default has to be the safe one.
+      GF_AUTH_ANONYMOUS_ENABLED: "${GRAFANA_ANONYMOUS:-false}"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      GF_SECURITY_COOKIE_SECURE: "${GRAFANA_COOKIE_SECURE:-false}"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+
 volumes:
   postgres-data:
+  prometheus-data:
+  grafana-data:
   storage-node-1-data:
   storage-node-2-data:
   storage-node-3-data:

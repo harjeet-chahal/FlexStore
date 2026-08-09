@@ -1,0 +1,76 @@
+# Alerting rules for the conditions an operator would actually act on.
+#
+# Thresholds assume the compose defaults (5s heartbeats, 45s dead timeout);
+# a real deployment would tune both together.
+
+groups:
+  - name: flexstore-durability
+    rules:
+      - alert: FlexstoreChunksUnavailable
+        expr: max(flexstore_unavailable_chunks) > 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Some data is currently unreadable"
+          description: >-
+            {{ $value }} committed chunk(s) have zero usable replicas. Repair
+            cannot fix this on its own — check whether a DEAD node still has
+            its disk before wiping anything.
+
+      - alert: FlexstoreUnderReplicated
+        expr: max(flexstore_under_replicated_chunks) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Under-replication is not clearing"
+          description: >-
+            {{ $value }} chunk(s) have been below the replication factor for
+            5 minutes. Normal repair finishes in seconds; check
+            /admin/replication for failed jobs and their last_error.
+
+      - alert: FlexstoreRepairsFailing
+        expr: increase(flexstore_repairs_failed_total[10m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Chunk repairs are failing"
+          description: >-
+            Repair attempts failed in the last 10 minutes. Usual causes: fewer
+            healthy nodes than the replication factor, or every healthy node
+            already holds a copy of the affected chunk.
+
+      - alert: FlexstoreDurabilityCounterDrift
+        expr: increase(flexstore_durability_counter_drift_total[1h]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Durability counters drifted from the underlying rows"
+          description: >-
+            The audit found chunks whose cached replica count disagreed with
+            reality. Durability reporting cannot be trusted until explained.
+
+  - name: flexstore-nodes
+    rules:
+      - alert: FlexstoreNodeDead
+        expr: max by (node_id) (flexstore_node_health) >= 3
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Storage node {{ $labels.node_id }} is DEAD"
+          description: >-
+            No heartbeat past the dead timeout. Its replicas no longer count
+            towards durability and repair is re-replicating them elsewhere.
+
+      - alert: FlexstoreChecksumFailures
+        expr: increase(flexstore_checksum_failures_total[15m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Checksum failures detected"
+          description: >-
+            SHA-256 mismatches were detected. The affected replicas are
+            demoted and replaced automatically; repeated failures on one node
+            point at failing hardware.

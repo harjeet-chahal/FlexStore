@@ -92,10 +92,18 @@ vet: ## Run go vet
 	$(GO) vet ./...
 
 .PHONY: lint
-lint: vet ## go vet plus a gofmt cleanliness check
+lint: vet ## Run golangci-lint (containerised) plus go vet
 	@echo "==> gofmt check"
 	@out=$$(./scripts/gotool.sh gofmt -l ./cmd ./internal ./tests ./migrations); \
 		if [ -n "$$out" ]; then echo "not gofmt-clean:"; echo "$$out"; exit 1; fi
+	@echo "==> golangci-lint"
+	docker run --rm \
+		-v "$(CURDIR):/src" \
+		-v flexstore-gocache:/root/.cache/go-build \
+		-v flexstore-golangci:/root/.cache/golangci-lint \
+		-v flexstore-gomodcache:/go/pkg/mod \
+		-w /src golangci/golangci-lint:v2.5.0-alpine \
+		golangci-lint run --timeout=5m ./...
 
 ## ------------------------------------------------------------- cluster ----
 

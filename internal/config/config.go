@@ -275,9 +275,6 @@ func LoadStorageNode() (StorageNode, error) {
 	if c.AdvertiseAddr == "" {
 		errs = append(errs, errors.New("FLEXSTORE_ADVERTISE_ADDR is required (host:port other services dial)"))
 	}
-	if c.Common.ServiceName == "storage-node" && c.NodeID != "" {
-		c.Common.ServiceName = "storage-node"
-	}
 	return c, errors.Join(errs...)
 }
 

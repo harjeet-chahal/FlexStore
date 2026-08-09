@@ -409,7 +409,8 @@ printf '\n%sExplore further:%s\n' "$B" "$R"
 printf '  curl -s %s/admin/health       | python3 -m json.tool\n' "$GATEWAY"
 printf '  curl -s %s/admin/replication  | python3 -m json.tool\n' "$GATEWAY"
 printf '  curl -s %s/admin/objects/%s/%s | python3 -m json.tool\n' "$GATEWAY" "$BUCKET" "$KEY"
-printf '  Live dashboard: %s/dashboard\n\n' "$GATEWAY"
+printf '  Live dashboard: %s/dashboard\n' "$GATEWAY"
+printf '  Grafana:        http://localhost:3000 (FlexStore -> Self-Healing)\n\n'
 
 if [ "$KEEP" != "1" ]; then
   curl -fsS -X DELETE "${GATEWAY}/objects/${BUCKET}/${KEY}" >/dev/null 2>&1 || true

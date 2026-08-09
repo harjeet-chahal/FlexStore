@@ -1,0 +1,148 @@
+{
+  "uid": "flexstore-overview",
+  "title": "FlexStore — Overview",
+  "tags": ["flexstore"],
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-30m", "to": "now" },
+  "editable": true,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Healthy nodes",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "flexstore-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "count(flexstore_node_health == 1) or vector(0)" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 3 },
+              { "color": "green", "value": 5 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Objects",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "flexstore-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(flexstore_objects_total{state=\"COMPLETE\"})" }
+      ],
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] }
+    },
+    {
+      "type": "stat",
+      "title": "Committed chunks",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "flexstore-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "max(flexstore_chunks_total)" }
+      ],
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] }
+    },
+    {
+      "type": "stat",
+      "title": "Under-replicated chunks",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "flexstore-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "max(flexstore_under_replicated_chunks)" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Unavailable chunks",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "flexstore-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "max(flexstore_unavailable_chunks)" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "HTTP in flight",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "flexstore-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "max(flexstore_http_requests_in_flight)" }
+      ],
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Client throughput",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "flexstore-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "rate(flexstore_upload_bytes_total[1m])", "legendFormat": "upload" },
+        { "refId": "B", "expr": "rate(flexstore_download_bytes_total[1m])", "legendFormat": "download" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "Bps", "custom": { "fillOpacity": 12 } }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "HTTP requests by route",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "flexstore-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (route) (rate(flexstore_http_requests_total[1m]))", "legendFormat": "{{route}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 8 } }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Object API latency (p50 / p95)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "flexstore-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(flexstore_http_request_duration_seconds_bucket{route=~\".*objects.*\"}[5m])))", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(flexstore_http_request_duration_seconds_bucket{route=~\".*objects.*\"}[5m])))", "legendFormat": "p95" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 8 } }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Storage used per node",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "flexstore-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "max by (node_id) (flexstore_storage_used_bytes{node_id!=\"\"})", "legendFormat": "{{node_id}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "fillOpacity": 8 } }, "overrides": [] }
+    }
+  ]
+}
