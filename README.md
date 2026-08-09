@@ -110,6 +110,6 @@ written to three nodes and fsynced; reads come from one.
 
 ## License & contact
 
-MIT — see [LICENSE](LICENSE).
+MIT - see [LICENSE](LICENSE).
 
 Built by **Harjeet Singh Chahal** ·
