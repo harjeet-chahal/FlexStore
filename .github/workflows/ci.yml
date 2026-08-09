@@ -1,0 +1,146 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer run of the same branch makes the older one irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.25"
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build, vet and unit test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # The metadata layer is almost entirely SQL -- transactions, partial unique
+    # indexes, triggers -- so its tests run against a real PostgreSQL. Without
+    # this they silently skip, which would hide exactly the bugs they exist to
+    # catch.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: flexstore
+          POSTGRES_PASSWORD: flexstore
+          POSTGRES_DB: flexstore_test
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U flexstore -d flexstore_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Verify go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: gofmt
+        run: |
+          out=$(gofmt -l ./cmd ./internal ./tests ./migrations ./benchmarks)
+          if [ -n "$out" ]; then
+            echo "These files are not gofmt-clean:"; echo "$out"; exit 1
+          fi
+
+      - name: go vet
+        run: |
+          go vet ./...
+          go vet -tags=integration ./tests/...
+
+      # GO=go bypasses the containerised toolchain wrapper: CI already has Go.
+      - name: Build binaries
+        run: make build GO=go
+
+      - name: Unit tests (race detector)
+        env:
+          FLEXSTORE_TEST_POSTGRES_DSN: postgres://flexstore:flexstore@127.0.0.1:55432/flexstore_test?sslmode=disable
+        run: go test -race -count=1 ./...
+
+  integration:
+    name: Integration tests against a real cluster
+    runs-on: ubuntu-latest
+    needs: [build-and-test]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Start cluster
+        run: docker compose up -d --build
+
+      - name: Wait for readiness
+        run: |
+          set -euo pipefail
+          ready=false
+          for _ in $(seq 1 90); do
+            if curl -fsS http://localhost:9101/readyz >/dev/null 2>&1; then
+              ready=true; break
+            fi
+            sleep 2
+          done
+          [ "$ready" = true ] || { echo "gateway never became ready"; exit 1; }
+
+          # All five storage nodes must have registered before placement can
+          # satisfy a replication factor of 3 with room to spare.
+          for _ in $(seq 1 60); do
+            healthy=$(curl -fsS http://localhost:8080/admin/nodes \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["healthy"])')
+            echo "healthy nodes: $healthy"
+            [ "$healthy" -ge 5 ] && exit 0
+            sleep 2
+          done
+          echo "only $healthy of 5 storage nodes became healthy"
+          exit 1
+
+      - name: Integration tests (includes node-kill and corruption scenarios)
+        env:
+          FLEXSTORE_GATEWAY_URL: http://localhost:8080
+        run: go test -tags=integration -count=1 -v -timeout=25m ./tests/integration/...
+
+      - name: Smoke test
+        run: ./scripts/smoke.sh http://localhost:8080
+
+      - name: Failure-recovery demo (small, as a final end-to-end gate)
+        env:
+          FLEXSTORE_GATEWAY_URL: http://localhost:8080
+          SIZE_MIB: "64"
+        run: ./scripts/demo-failure-recovery.sh
+
+      - name: Durability must be fully restored at the end
+        run: |
+          under=$(curl -fsS http://localhost:8080/admin/replication \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["under_replicated_chunks"])')
+          echo "under-replicated chunks: $under"
+          test "$under" = "0"
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs --tail=300
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v --remove-orphans

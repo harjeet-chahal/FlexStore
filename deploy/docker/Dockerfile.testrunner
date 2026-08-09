@@ -1,0 +1,24 @@
+# Test runner for the integration suite.
+#
+# The failure-injection tests genuinely stop, restart and exec into cluster
+# containers -- that is the point, since simulating a restart in-process would
+# prove nothing about what survives one. So the runner needs both the Go
+# toolchain and a Docker CLI talking to the host daemon.
+#
+# CI does not use this image: GitHub Actions runners already have Go and Docker
+# natively. It exists so the same suite can run on a developer machine that has
+# Docker but no local Go install.
+FROM golang:1.25
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl gnupg git \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+       > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src

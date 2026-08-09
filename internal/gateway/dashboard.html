@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FlexStore — Live Cluster</title>
+<style>
+  :root{
+    --bg:#0a101f; --panel:#0f1729; --panel2:#131e36; --line:rgba(148,163,184,.14);
+    --ink:#e7eef9; --muted:#8397b2; --dim:#5b6b84;
+    --sky:#38bdf8; --green:#34d399; --amber:#fbbf24; --red:#f87171; --violet:#a78bfa;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:
+      radial-gradient(1100px 500px at 75% -10%, rgba(56,189,248,.07), transparent 60%),
+      radial-gradient(900px 420px at 10% 110%, rgba(52,211,153,.05), transparent 60%),
+      var(--bg);
+    color:var(--ink);
+    font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    padding:18px 22px 22px;
+  }
+  .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+  /* ---------------------------------------------------------- header --- */
+  header{display:flex;align-items:center;gap:16px;margin-bottom:14px}
+  .logo{display:flex;align-items:center;gap:10px;font-size:17px;font-weight:650;letter-spacing:.2px}
+  .logo svg{filter:drop-shadow(0 0 6px rgba(56,189,248,.55))}
+  .pill{
+    display:inline-flex;align-items:center;gap:8px;border-radius:999px;
+    padding:5px 14px 5px 10px;font-weight:600;font-size:13px;letter-spacing:.4px;
+    border:1px solid var(--line);background:var(--panel);
+  }
+  .pill .dot{width:9px;height:9px;border-radius:50%}
+  .pill.ok    {color:#a7f3d0;border-color:rgba(52,211,153,.35)}
+  .pill.ok    .dot{background:var(--green);box-shadow:0 0 10px var(--green);animation:pulse 2.4s infinite}
+  .pill.heal  {color:#fde68a;border-color:rgba(251,191,36,.4)}
+  .pill.heal  .dot{background:var(--amber);box-shadow:0 0 10px var(--amber);animation:pulse 1s infinite}
+  .pill.bad   {color:#fecaca;border-color:rgba(248,113,113,.45)}
+  .pill.bad   .dot{background:var(--red);box-shadow:0 0 10px var(--red);animation:pulse .7s infinite}
+  .pill.off   {color:var(--muted)}
+  .pill.off   .dot{background:var(--dim)}
+  @keyframes pulse{50%{opacity:.35}}
+  .kpis{margin-left:auto;display:flex;gap:22px;text-align:right}
+  .kpi .v{font-size:17px;font-weight:650}
+  .kpi .l{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:1.1px}
+  #clock{color:var(--dim);font-size:12px;min-width:120px;text-align:right}
+
+  /* ---------------------------------------------------------- layout --- */
+  .grid{display:grid;grid-template-columns:1fr 1fr 1.25fr;gap:12px}
+  .topo{grid-column:1 / -1}
+  .card{
+    background:linear-gradient(180deg,var(--panel2),var(--panel));
+    border:1px solid var(--line);border-radius:14px;padding:12px 14px;
+    box-shadow:0 8px 28px rgba(2,6,17,.45);
+  }
+  .card h2{
+    font-size:10.5px;color:var(--muted);text-transform:uppercase;
+    letter-spacing:1.4px;font-weight:600;margin-bottom:8px;
+    display:flex;align-items:center;gap:8px;
+  }
+  .card h2 .spacer{margin-left:auto;color:var(--dim);text-transform:none;letter-spacing:0;font-weight:500}
+  main.stale{filter:saturate(.5) brightness(.8)}
+
+  /* ------------------------------------------------------- healing bar --- */
+  #healbar{
+    display:none;margin:-2px 0 12px;padding:9px 16px;border-radius:12px;
+    font-weight:600;align-items:center;gap:12px;font-size:13.5px;
+  }
+  #healbar.heal{display:flex;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.35);color:#fde68a}
+  #healbar.bad {display:flex;background:rgba(248,113,113,.10);border:1px solid rgba(248,113,113,.4); color:#fecaca}
+  #healbar .bar{flex:1;height:6px;border-radius:3px;background:rgba(148,163,184,.15);overflow:hidden}
+  #healbar .bar i{display:block;height:100%;background:var(--amber);border-radius:3px;transition:width .6s ease}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #healbar svg{animation:spin 1.6s linear infinite}
+
+  /* ----------------------------------------------------------- SVG topo --- */
+  svg text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .box{fill:#16233f;stroke:rgba(148,163,184,.22);stroke-width:1;rx:12}
+  .box.svc{fill:#182a4a}
+  .bt{fill:var(--ink);font-size:15px;font-weight:650}
+  .bs{fill:var(--muted);font-size:10.5px}
+  .bn{fill:var(--sky);font-size:11.5px;font-family:var(--mono)}
+  .edge{fill:none;stroke:rgba(56,189,248,.30);stroke-width:1.6;stroke-dasharray:5 9;animation:flow 1.6s linear infinite}
+  .edge.fan{stroke:rgba(56,189,248,.22)}
+  .edge.hb{stroke:rgba(148,163,184,.16);stroke-width:1.1;stroke-dasharray:2 7;animation-duration:3.2s}
+  .edge.tx{stroke:rgba(56,189,248,.85);stroke-width:2.2;animation-duration:.45s;filter:drop-shadow(0 0 4px rgba(56,189,248,.6))}
+  .edge.rx{stroke:rgba(167,139,250,.75);stroke-width:2;animation-duration:.5s}
+  @keyframes flow{to{stroke-dashoffset:-28}}
+  .arc{fill:none;stroke:var(--green);stroke-width:2.2;stroke-dasharray:7 8;animation:flow .5s linear infinite;filter:drop-shadow(0 0 5px rgba(52,211,153,.7))}
+  .arclabel{fill:#a7f3d0;font-size:10px;font-weight:600;letter-spacing:.6px}
+
+  .node rect.body{fill:#152443;stroke:rgba(148,163,184,.25);stroke-width:1;transition:all .5s}
+  .node.HEALTHY rect.body{stroke:rgba(52,211,153,.45)}
+  .node.SUSPECT rect.body{stroke:rgba(251,191,36,.65);filter:drop-shadow(0 0 8px rgba(251,191,36,.25))}
+  .node.DEAD    rect.body{stroke:rgba(248,113,113,.7);fill:#1d1626;filter:drop-shadow(0 0 10px rgba(248,113,113,.3))}
+  .node.DEAD text{opacity:.55}
+  .node .dot{animation:pulse 2.2s infinite}
+  .node.HEALTHY .dot{fill:var(--green)}
+  .node.SUSPECT .dot{fill:var(--amber);animation-duration:.9s}
+  .node.DEAD    .dot{fill:var(--red);animation:none}
+  .node .nm{fill:var(--ink);font-size:13.5px;font-weight:650}
+  .node .st{font-size:9.5px;font-weight:700;letter-spacing:1.2px}
+  .node.HEALTHY .st{fill:var(--green)} .node.SUSPECT .st{fill:var(--amber)} .node.DEAD .st{fill:var(--red)}
+  .node .meta{fill:var(--muted);font-size:10.5px}
+  .node .val{fill:var(--ink);font-family:var(--mono);font-size:11px}
+  .node .barbg{fill:rgba(148,163,184,.14)}
+  .node .barfill{fill:var(--sky);transition:width .8s ease}
+  .node.gone .barfill{fill:var(--red)}
+  .flash{animation:flash 1.2s ease-out}
+  @keyframes flash{0%{fill:#a7f3d0}100%{}}
+
+  /* ------------------------------------------------------- bottom panels --- */
+  .bignums{display:flex;gap:18px;margin-bottom:8px;flex-wrap:wrap}
+  .bignum .v{font-size:22px;font-weight:680;line-height:1.1}
+  .bignum .u{font-size:11px;color:var(--muted);font-weight:500;margin-left:2px}
+  .bignum .l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-top:2px}
+  .spark{width:100%;height:56px;display:block}
+  .legend{display:flex;gap:14px;font-size:11px;color:var(--muted);margin-top:4px}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+  .chips{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+  .chip{border:1px solid var(--line);background:rgba(148,163,184,.06);border-radius:9px;
+        padding:5px 10px;font-size:12px;color:var(--muted)}
+  .chip b{color:var(--ink);font-family:var(--mono);font-size:13px;margin-right:4px}
+  .chip.on-amber{border-color:rgba(251,191,36,.45);color:#fde68a;background:rgba(251,191,36,.07)}
+  .chip.on-green{border-color:rgba(52,211,153,.4);color:#a7f3d0;background:rgba(52,211,153,.06)}
+  .chip.on-red{border-color:rgba(248,113,113,.5);color:#fecaca;background:rgba(248,113,113,.07)}
+
+  #feed{list-style:none;overflow-y:auto;max-height:132px;font-size:12.3px}
+  #feed li{display:flex;gap:9px;padding:3.5px 2px;border-bottom:1px dashed rgba(148,163,184,.08);align-items:baseline}
+  #feed .t{color:var(--dim);font-family:var(--mono);font-size:11px;flex:none}
+  #feed .ic{flex:none;width:14px;text-align:center}
+  #feed li.g .ic{color:var(--green)} #feed li.a .ic{color:var(--amber)}
+  #feed li.r .ic{color:var(--red)}   #feed li.b .ic{color:var(--sky)}
+  #feed::-webkit-scrollbar{width:8px} #feed::-webkit-scrollbar-thumb{background:rgba(148,163,184,.2);border-radius:4px}
+
+  /* ---------------------------------------------------------- token modal --- */
+  #tokbox{position:fixed;inset:0;display:none;place-items:center;background:rgba(4,8,18,.7);backdrop-filter:blur(3px)}
+  #tokbox.show{display:grid}
+  #tokbox .m{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:22px;width:360px}
+  #tokbox h3{font-size:15px;margin-bottom:6px} #tokbox p{color:var(--muted);font-size:12.5px;margin-bottom:12px}
+  #tokbox input{width:100%;background:#0b1322;border:1px solid var(--line);border-radius:8px;
+                color:var(--ink);padding:9px 11px;font-family:var(--mono);font-size:13px;margin-bottom:12px}
+  #tokbox button{width:100%;background:var(--sky);border:0;border-radius:8px;padding:9px;
+                 font-weight:650;color:#06263a;cursor:pointer;font-size:13.5px}
+  footer{margin-top:10px;color:var(--dim);font-size:11px;display:flex;gap:14px}
+  footer a{color:var(--muted);text-decoration:none} footer a:hover{color:var(--sky)}
+  @media (max-width:1100px){.grid{grid-template-columns:1fr}.kpis{display:none}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+      <path d="M12 2 21 7v10l-9 5-9-5V7l9-5z" stroke="#38bdf8" stroke-width="1.6" fill="rgba(56,189,248,.12)"/>
+      <path d="M12 12 21 7M12 12v10M12 12 3 7" stroke="#38bdf8" stroke-width="1.2" opacity=".7"/>
+    </svg>
+    FlexStore
+  </div>
+  <span id="status" class="pill off"><span class="dot"></span><span id="status-t">connecting…</span></span>
+  <div class="kpis">
+    <div class="kpi"><div class="v num" id="k-objects">–</div><div class="l">objects</div></div>
+    <div class="kpi"><div class="v num" id="k-chunks">–</div><div class="l">chunks</div></div>
+    <div class="kpi"><div class="v num" id="k-replicas">–</div><div class="l">replicas held</div></div>
+    <div class="kpi"><div class="v num" id="k-rf">–</div><div class="l">replication</div></div>
+  </div>
+  <div id="clock" class="num">–</div>
+</header>
+
+<div id="healbar"><svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+  <path d="M21 12a9 9 0 1 1-3.4-7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+  <span id="heal-t"></span><div class="bar"><i id="heal-fill"></i></div><span class="num" id="heal-pct"></span>
+</div>
+
+<main class="grid">
+  <section class="card topo">
+    <h2>Cluster topology — live
+      <span class="spacer" id="topo-note">object bytes flow client ⇄ gateway ⇄ storage nodes; the coordinator only decides</span>
+    </h2>
+    <svg id="topo" viewBox="0 0 1200 465" width="100%" preserveAspectRatio="xMidYMid meet">
+      <!-- static plane -->
+      <path class="edge" id="e-cg" d="M162,96 C 205,96 210,96 252,96"/>
+      <path class="edge" id="e-gc" d="M452,96 C 505,96 508,96 560,96"/>
+      <path class="edge" d="M772,78  C 825,68 830,60 880,56"/>
+      <path class="edge" d="M772,114 C 825,124 830,132 880,136"/>
+
+      <g>
+        <rect class="box" x="30"  y="64" width="132" height="64" rx="12"/>
+        <text class="bt" x="96" y="92" text-anchor="middle" font-size="14">Clients</text>
+        <text class="bs" x="96" y="110" text-anchor="middle">S3-like HTTP</text>
+      </g>
+      <g>
+        <rect class="box svc" x="252" y="48" width="200" height="96" rx="12"/>
+        <text class="bt" x="352" y="78" text-anchor="middle">Gateway</text>
+        <text class="bs" x="352" y="96" text-anchor="middle">chunk · SHA-256 · fan-out</text>
+        <text class="bn" x="352" y="126" text-anchor="middle" id="gw-line">– req/s</text>
+      </g>
+      <g>
+        <rect class="box svc" x="560" y="48" width="212" height="96" rx="12"/>
+        <text class="bt" x="666" y="78" text-anchor="middle">Coordinator</text>
+        <text class="bs" x="666" y="96" text-anchor="middle">placement · health · repair</text>
+        <text class="bn" x="666" y="126" text-anchor="middle" id="co-line">–</text>
+      </g>
+      <g>
+        <rect class="box" x="880" y="28" width="158" height="56" rx="12"/>
+        <text class="bt" x="959" y="52" text-anchor="middle" font-size="13.5">PostgreSQL</text>
+        <text class="bs" x="959" y="70" text-anchor="middle">source of truth</text>
+      </g>
+      <g>
+        <rect class="box" x="880" y="108" width="158" height="56" rx="12"/>
+        <text class="bt" x="959" y="132" text-anchor="middle" font-size="13.5">Redis</text>
+        <text class="bs" x="959" y="150" text-anchor="middle">layout cache</text>
+      </g>
+
+      <g id="fanedges"></g>
+      <g id="nodes"></g>
+      <g id="arcs"></g>
+    </svg>
+  </section>
+
+  <section class="card">
+    <h2>Traffic <span class="spacer">gateway, live rates</span></h2>
+    <div class="bignums">
+      <div class="bignum"><div class="v num" id="t-up">0<span class="u">MiB/s</span></div><div class="l">upload</div></div>
+      <div class="bignum"><div class="v num" id="t-down">0<span class="u">MiB/s</span></div><div class="l">download</div></div>
+      <div class="bignum"><div class="v num" id="t-rps">0<span class="u">req/s</span></div><div class="l">requests</div></div>
+    </div>
+    <svg id="s-traffic" class="spark" viewBox="0 0 400 56" preserveAspectRatio="none"></svg>
+    <div class="legend"><span><i style="background:var(--sky)"></i>upload</span>
+      <span><i style="background:var(--violet)"></i>download</span></div>
+  </section>
+
+  <section class="card">
+    <h2>Durability <span class="spacer">from PostgreSQL, not hopes</span></h2>
+    <div class="bignums">
+      <div class="bignum"><div class="v num" id="d-under" style="color:var(--green)">0</div><div class="l">under-replicated</div></div>
+      <div class="bignum"><div class="v num" id="d-unavail" style="color:var(--green)">0</div><div class="l">unavailable</div></div>
+      <div class="bignum"><div class="v num" id="d-stored">–</div><div class="l">stored (×RF)</div></div>
+    </div>
+    <svg id="s-under" class="spark" viewBox="0 0 400 56" preserveAspectRatio="none"></svg>
+    <div class="legend"><span><i style="background:var(--amber)"></i>under-replicated chunks — the self-healing curve</span></div>
+  </section>
+
+  <section class="card">
+    <h2>Self-healing <span class="spacer">repair queue &amp; event feed</span></h2>
+    <div class="chips">
+      <span class="chip" id="c-pend"><b>0</b>pending</span>
+      <span class="chip" id="c-run"><b>0</b>running</span>
+      <span class="chip" id="c-done"><b>0</b>repaired total</span>
+      <span class="chip" id="c-fail"><b>0</b>failed</span>
+    </div>
+    <ul id="feed"></ul>
+  </section>
+</main>
+
+<footer>
+  <span>polls <span class="num">/admin/nodes · /admin/replication · /admin/stats</span> every 2s — everything shown is queried live</span>
+  <a href="/admin/replication" target="_blank">raw JSON</a>
+  <span style="margin-left:auto" id="foot-upd"></span>
+</footer>
+
+<div id="tokbox"><div class="m">
+  <h3>Admin token required</h3>
+  <p>This gateway runs with <span class="num">FLEXSTORE_ADMIN_TOKEN</span> set. Paste it to let the
+     dashboard read the (read-only) admin endpoints. Stored only in this browser.</p>
+  <input id="tok-in" type="password" placeholder="bearer token" autocomplete="off">
+  <button id="tok-go">Connect</button>
+</div></div>
+
+<script>
+"use strict";
+/* FlexStore live dashboard.
+   No framework, no external assets: the page must work on an offline laptop
+   and must never be able to disagree with the API it fronts. All state below
+   is either fetched this tick or derived by diffing two consecutive ticks. */
+
+const $ = id => document.getElementById(id);
+const POLL_MS = 2000, WINDOW = 90;              // ~3 minutes of sparkline
+const fmtMiB = b => (b/1048576).toFixed(b >= 104857600 ? 0 : 1);
+const fmtBytes = b => b >= 1073741824 ? (b/1073741824).toFixed(1)+" GiB"
+                    : b >= 1048576    ? (b/1048576).toFixed(0)+" MiB"
+                    : (b/1024).toFixed(0)+" KiB";
+const now = () => new Date().toLocaleTimeString([], {hour12:false});
+
+/* ------------------------------------------------------------- fetching --- */
+let token = localStorage.getItem("flexstore_admin_token") || "";
+async function api(path){
+  const headers = token ? {Authorization: "Bearer "+token} : {};
+  const r = await fetch(path, {headers, cache:"no-store"});
+  if (r.status === 401) { $("tokbox").classList.add("show"); throw new Error("401"); }
+  if (!r.ok) throw new Error(path+" -> "+r.status);
+  return r.json();
+}
+$("tok-go").onclick = () => {
+  token = $("tok-in").value.trim();
+  localStorage.setItem("flexstore_admin_token", token);
+  $("tokbox").classList.remove("show");
+  tick();
+};
+
+/* --------------------------------------------------------------- state --- */
+let prev = null;                    // last good sample bundle
+let series = {up:[], down:[], under:[]};
+let healPeak = 0, healStart = 0;
+let offlineSince = 0;
+
+/* ------------------------------------------------------------ node layout --- */
+/* Node cards are generated, not hard-coded, so the same page is honest for a
+   1-node scaling run and a 5-node demo alike. */
+const NS = "http://www.w3.org/2000/svg";
+const el = (tag, attrs, text) => {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text !== undefined) e.textContent = text;
+  return e;
+};
+let nodePos = {};                    // node_id -> centre x
+let builtFor = "";
+
+function buildNodes(nodes){
+  const key = nodes.map(n => n.node_id).join(",");
+  if (key === builtFor) return;
+  builtFor = key;
+  nodePos = {};
+  const fans = $("fanedges"), grp = $("nodes");
+  fans.textContent = ""; grp.textContent = "";
+
+  const N = nodes.length, left = 60, right = 1140;
+  const w = Math.min(190, (right-left)/N - 18);
+  nodes.forEach((n, i) => {
+    const cx = left + (right-left) * (i + .5) / N;
+    nodePos[n.node_id] = cx;
+
+    fans.appendChild(el("path", {class:"edge fan", id:"fan-"+i,
+      d:`M352,144 C 352,225 ${cx},230 ${cx},298`}));
+    fans.appendChild(el("path", {class:"edge hb",
+      d:`M666,144 C 666,225 ${cx},235 ${cx},298`}));
+
+    const g = el("g", {class:"node HEALTHY", id:"node-"+n.node_id});
+    g.appendChild(el("rect", {class:"body", x:cx-w/2, y:298, width:w, height:134, rx:14}));
+    g.appendChild(el("circle",{class:"dot", cx:cx-w/2+18, cy:322, r:5.5}));
+    g.appendChild(el("text",  {class:"nm", x:cx-w/2+32, y:327, id:"nm-"+n.node_id},
+                    n.node_id.replace("storage-","")));
+    g.appendChild(el("text",  {class:"st", x:cx+w/2-12, y:326, "text-anchor":"end", id:"st-"+n.node_id}, "HEALTHY"));
+    g.appendChild(el("text",  {class:"meta", x:cx-w/2+14, y:352}, "chunks"));
+    g.appendChild(el("text",  {class:"val",  x:cx+w/2-12, y:352, "text-anchor":"end", id:"ch-"+n.node_id}, "0"));
+    g.appendChild(el("text",  {class:"meta", x:cx-w/2+14, y:372}, "stored"));
+    g.appendChild(el("text",  {class:"val",  x:cx+w/2-12, y:372, "text-anchor":"end", id:"us-"+n.node_id}, "0"));
+    g.appendChild(el("text",  {class:"meta", x:cx-w/2+14, y:392}, "heartbeat"));
+    g.appendChild(el("text",  {class:"val",  x:cx+w/2-12, y:392, "text-anchor":"end", id:"hb-"+n.node_id}, "–"));
+    g.appendChild(el("rect",  {class:"barbg",   x:cx-w/2+14, y:406, width:w-28, height:7, rx:3.5}));
+    g.appendChild(el("rect",  {class:"barfill", x:cx-w/2+14, y:406, width:0,    height:7, rx:3.5, id:"bar-"+n.node_id}));
+    grp.appendChild(g);
+  });
+}
+
+/* --------------------------------------------------------------- events --- */
+function feed(kind, icon, msg){
+  const li = document.createElement("li");
+  li.className = kind;
+  li.innerHTML = `<span class="t">${now()}</span><span class="ic">${icon}</span><span>${msg}</span>`;
+  const f = $("feed");
+  f.prepend(li);
+  while (f.children.length > 60) f.removeChild(f.lastChild);
+}
+
+/* ------------------------------------------------------------ sparklines --- */
+function drawSpark(svg, lines){
+  svg.textContent = "";
+  const W = 400, H = 56, P = 3;
+  const max = Math.max(1e-9, ...lines.flatMap(l => l.data));
+  for (const l of lines){
+    const d = l.data; if (!d.length) continue;
+    const step = (W - 2*P) / Math.max(WINDOW - 1, 1);
+    const x = i => P + i*step;
+    const y = v => H - P - (v/max)*(H - 2*P);
+    let path = "M"+x(0)+","+y(d[0]);
+    for (let i = 1; i < d.length; i++) path += " L"+x(i)+","+y(d[i]);
+    if (l.fill){
+      const area = path + ` L${x(d.length-1)},${H-P} L${x(0)},${H-P} Z`;
+      svg.appendChild(el("path", {d:area, fill:l.fill, stroke:"none"}));
+    }
+    svg.appendChild(el("path", {d:path, fill:"none", stroke:l.stroke, "stroke-width":1.8,
+                                "stroke-linejoin":"round", "stroke-linecap":"round"}));
+  }
+}
+
+/* ---------------------------------------------------------------- tick --- */
+async function tick(){
+  let cluster, repl, stats;
+  try {
+    [cluster, repl, stats] = await Promise.all([
+      api("/admin/nodes"), api("/admin/replication?jobs=8"), api("/admin/stats"),
+    ]);
+  } catch (e) {
+    if (!offlineSince) { offlineSince = Date.now(); feed("r","✖","lost contact with the gateway"); }
+    setStatus("off", "OFFLINE — reconnecting…");
+    document.querySelector("main").classList.add("stale");
+    return;
+  }
+  if (offlineSince){
+    feed("g","✓",`gateway reachable again after ${((Date.now()-offlineSince)/1000).toFixed(0)}s`);
+    offlineSince = 0;
+  }
+  document.querySelector("main").classList.remove("stale");
+
+  const t = Date.now();
+  const nodes = [...cluster.nodes].sort((a,b) => a.node_id < b.node_id ? -1 : 1);
+  buildNodes(nodes);
+
+  /* ---- header KPIs ---- */
+  $("k-objects").textContent  = cluster.total_objects;
+  $("k-chunks").textContent   = cluster.total_chunks;
+  $("k-rf").textContent       = "×"+repl.replication_factor;
+  const replicasHeld = nodes.reduce((s,n) => s + n.chunk_count, 0);
+  $("k-replicas").textContent = replicasHeld;
+  $("clock").textContent      = now();
+  $("foot-upd").textContent   = "updated "+now();
+
+  /* ---- status pill + healing banner ---- */
+  const under = repl.under_replicated_chunks, unavail = repl.unavailable_chunks;
+  const deadN = nodes.filter(n => n.health === "DEAD").length;
+  const susN  = nodes.filter(n => n.health === "SUSPECT").length;
+  const hb = $("healbar");
+  if (unavail > 0){
+    setStatus("bad", "DATA UNAVAILABLE");
+    hb.className = "bad";
+    $("heal-t").textContent = `${unavail} chunk${unavail>1?"s":""} have no readable replica — repair has nothing to copy from`;
+    $("heal-fill").style.width = "100%"; $("heal-pct").textContent = "";
+  } else if (under > 0){
+    if (healPeak === 0){ healStart = t; feed("a","▲",`durability degraded — ${under} chunk${under>1?"s":""} under-replicated`); }
+    healPeak = Math.max(healPeak, under);
+    const done = healPeak - under, pct = Math.round(100*done/healPeak);
+    setStatus("heal", "SELF-HEALING");
+    hb.className = "heal";
+    $("heal-t").textContent = `re-replicating: ${done} of ${healPeak} chunks restored`;
+    $("heal-fill").style.width = pct+"%"; $("heal-pct").textContent = pct+"%";
+  } else {
+    if (healPeak > 0){
+      feed("g","✓",`durability restored — ${healPeak} chunk${healPeak>1?"s":""} re-replicated in ${((t-healStart)/1000).toFixed(1)}s`);
+      healPeak = 0;
+    }
+    hb.className = "";
+    if (deadN || susN) setStatus("heal", deadN ? `DEGRADED — ${deadN} node${deadN>1?"s":""} down` : "NODE SUSPECT");
+    else setStatus("ok", "HEALTHY");
+  }
+
+  /* ---- rates from counter deltas ---- */
+  let upRate = 0, downRate = 0, rps = 0, repairRate = 0;
+  if (prev){
+    const dt = (t - prev.t)/1000;
+    upRate     = Math.max(0, (stats.upload_bytes_total   - prev.stats.upload_bytes_total)  /dt);
+    downRate   = Math.max(0, (stats.download_bytes_total - prev.stats.download_bytes_total)/dt);
+    rps        = Math.max(0, (stats.http_requests_total  - prev.stats.http_requests_total) /dt);
+    repairRate = Math.max(0, repl.repair_jobs_succeeded  - prev.repl.repair_jobs_succeeded);
+  }
+  $("t-up").innerHTML   = fmtMiB(upRate)  +'<span class="u">MiB/s</span>';
+  $("t-down").innerHTML = fmtMiB(downRate)+'<span class="u">MiB/s</span>';
+  $("t-rps").innerHTML  = rps.toFixed(1)  +'<span class="u">req/s</span>';
+  $("gw-line").textContent = rps.toFixed(1)+" req/s · "+fmtMiB(upRate)+" ⇡ · "+fmtMiB(downRate)+" ⇣ MiB/s";
+  $("co-line").textContent = repl.repair_jobs_running > 0
+      ? `⚙ ${repl.repair_jobs_running} repair${repl.repair_jobs_running>1?"s":""} running`
+      : (repl.repair_enabled ? "repair armed · idle" : "repair DISABLED");
+
+  /* data-flow intensity on the client→gateway→nodes edges */
+  $("e-cg").setAttribute("class", "edge" + (upRate>1e5 ? " tx" : downRate>1e5 ? " rx" : ""));
+  $("e-gc").setAttribute("class", "edge");
+  document.querySelectorAll("#fanedges .fan").forEach(p =>
+    p.setAttribute("class", "edge fan" + (upRate>1e5 ? " tx" : "")));
+
+  /* ---- durability panel ---- */
+  $("d-under").textContent = under;   $("d-under").style.color   = under   ? "var(--amber)" : "var(--green)";
+  $("d-unavail").textContent = unavail; $("d-unavail").style.color = unavail ? "var(--red)" : "var(--green)";
+  const stored = nodes.reduce((s,n) => s + n.used_bytes, 0);
+  $("d-stored").textContent = fmtBytes(stored);
+
+  /* ---- repair chips ---- */
+  $("c-pend").innerHTML = `<b>${repl.repair_jobs_pending}</b>pending`;
+  $("c-run").innerHTML  = `<b>${repl.repair_jobs_running}</b>running`;
+  $("c-done").innerHTML = `<b>${repl.repair_jobs_succeeded}</b>repaired total`;
+  $("c-fail").innerHTML = `<b>${repl.repair_jobs_failed}</b>failed`;
+  $("c-pend").className = "chip" + (repl.repair_jobs_pending ? " on-amber" : "");
+  $("c-run").className  = "chip" + (repl.repair_jobs_running ? " on-green" : "");
+  $("c-fail").className = "chip" + (repl.repair_jobs_failed  ? " on-red"   : "");
+
+  /* ---- node cards ---- */
+  for (const n of nodes){
+    const g = $("node-"+n.node_id); if (!g) continue;
+    g.setAttribute("class", "node "+n.health + (n.health==="DEAD" ? " gone" : ""));
+    $("st-"+n.node_id).textContent = n.health;
+    const chEl = $("ch-"+n.node_id);
+    if (prev && prev.byNode[n.node_id] && n.chunk_count !== prev.byNode[n.node_id].chunk_count){
+      chEl.classList.remove("flash"); void chEl.getBBox(); chEl.classList.add("flash");
+    }
+    chEl.textContent = n.chunk_count;
+    $("us-"+n.node_id).textContent = fmtBytes(n.used_bytes);
+    const hbs = n.last_heartbeat_at ? Math.max(0,(t - Date.parse(n.last_heartbeat_at))/1000) : NaN;
+    $("hb-"+n.node_id).textContent = isNaN(hbs) ? "–" : hbs.toFixed(0)+"s ago";
+    const bar = $("bar-"+n.node_id), bg = bar.previousElementSibling;
+    const frac = n.total_bytes ? Math.min(1, n.used_bytes/n.total_bytes) : 0;
+    bar.setAttribute("width", (parseFloat(bg.getAttribute("width")) * frac).toFixed(1));
+  }
+
+  /* ---- live repair arcs (source -> target of RUNNING jobs) ---- */
+  const arcs = $("arcs"); arcs.textContent = "";
+  const running = (repl.recent_jobs||[]).filter(j => j.state === "RUNNING" && j.source_node_id && j.target_node_id);
+  running.slice(0,6).forEach(j => {
+    const sx = nodePos[j.source_node_id], txp = nodePos[j.target_node_id];
+    if (sx === undefined || txp === undefined) return;
+    const mid = (sx+txp)/2;
+    arcs.appendChild(el("path",{class:"arc", d:`M${sx},296 Q ${mid},214 ${txp},296`}));
+    arcs.appendChild(el("text",{class:"arclabel", x:mid, y:236, "text-anchor":"middle"},
+      "repairing → "+j.target_node_id.replace("storage-","")));
+  });
+
+  /* ---- event diffs vs previous tick ---- */
+  if (prev){
+    for (const n of nodes){
+      const p = prev.byNode[n.node_id];
+      if (p && p.health !== n.health){
+        const short = n.node_id.replace("storage-","");
+        if (n.health === "DEAD")         feed("r","✖",`${short} declared <b>DEAD</b> — its replicas no longer count`);
+        else if (n.health === "SUSPECT") feed("a","▲",`${short} is <b>SUSPECT</b> — heartbeats late`);
+        else if (p.health !== "HEALTHY") feed("g","●",`${short} is <b>HEALTHY</b> again — files held STALE until verified`);
+      }
+    }
+    const dObj = cluster.total_objects - prev.cluster.total_objects;
+    if (dObj > 0) feed("b","⬆",`+${dObj} object${dObj>1?"s":""} uploaded (${fmtBytes(Math.max(0,stats.upload_bytes_total-prev.stats.upload_bytes_total))})`);
+    if (dObj < 0) feed("b","🗑",`${-dObj} object${dObj<-1?"s":""} deleted`);
+    if (repairRate > 0) feed("g","⚙",`${repairRate} chunk${repairRate>1?"s":""} re-replicated`);
+    if (repl.repair_jobs_failed > prev.repl.repair_jobs_failed)
+      feed("r","!",`repair job failed (attempts exhausted) — see /admin/replication`);
+  } else {
+    feed("b","●", `connected — ${nodes.length} nodes, ${cluster.total_chunks} chunks at RF=${repl.replication_factor}`);
+  }
+
+  /* ---- sparklines ---- */
+  series.up.push(upRate/1048576);  series.down.push(downRate/1048576); series.under.push(under);
+  for (const k in series) if (series[k].length > WINDOW) series[k].shift();
+  drawSpark($("s-traffic"), [
+    {data:series.down, stroke:"var(--violet)"},
+    {data:series.up,   stroke:"var(--sky)", fill:"rgba(56,189,248,.10)"},
+  ]);
+  drawSpark($("s-under"), [
+    {data:series.under, stroke:"var(--amber)", fill:"rgba(251,191,36,.12)"},
+  ]);
+
+  prev = {t, cluster, repl, stats, byNode:Object.fromEntries(nodes.map(n => [n.node_id,n]))};
+}
+
+function setStatus(cls, txt){
+  $("status").className = "pill "+cls;
+  $("status-t").textContent = txt;
+}
+
+tick();
+setInterval(tick, POLL_MS);
+</script>
+</body>
+</html>

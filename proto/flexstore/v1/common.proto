@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package flexstore.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/harjeetschahal/flexstore/gen/flexstorev1;flexstorev1";
+
+// NodeHealth mirrors the coordinator-side health state machine.
+// Transitions are driven purely by heartbeat recency; see internal/health.
+enum NodeHealth {
+  NODE_HEALTH_UNSPECIFIED = 0;
+  NODE_HEALTH_HEALTHY = 1;
+  NODE_HEALTH_SUSPECT = 2;
+  NODE_HEALTH_DEAD = 3;
+}
+
+// ObjectState is the lifecycle of a logical object version.
+enum ObjectState {
+  OBJECT_STATE_UNSPECIFIED = 0;
+  OBJECT_STATE_UPLOADING = 1;
+  OBJECT_STATE_COMPLETE = 2;
+  OBJECT_STATE_DELETING = 3;
+  OBJECT_STATE_FAILED = 4;
+}
+
+// ReplicaState tracks a single chunk copy on a single node.
+enum ReplicaState {
+  REPLICA_STATE_UNSPECIFIED = 0;
+  REPLICA_STATE_WRITING = 1;
+  REPLICA_STATE_AVAILABLE = 2;
+  REPLICA_STATE_UNAVAILABLE = 3;
+  REPLICA_STATE_DELETING = 4;
+  // CORRUPT: the bytes failed SHA-256 verification. Distinct from UNAVAILABLE
+  // (node unreachable) because the remedy differs -- a corrupt replica's file
+  // must be removed, not waited for.
+  REPLICA_STATE_CORRUPT = 5;
+  // STALE: the node holding this replica went away and came back. The copy is
+  // probably fine, but it is not trusted until the reconciler has verified it,
+  // so it does not count towards durability.
+  REPLICA_STATE_STALE = 6;
+}
+
+// RepairJobState is the lifecycle of one re-replication job.
+enum RepairJobState {
+  REPAIR_JOB_STATE_UNSPECIFIED = 0;
+  REPAIR_JOB_STATE_PENDING = 1;
+  REPAIR_JOB_STATE_RUNNING = 2;
+  REPAIR_JOB_STATE_SUCCEEDED = 3;
+  REPAIR_JOB_STATE_FAILED = 4;
+}
+
+// NodeStats is reported by storage nodes on every heartbeat and is the input
+// to the placement engine's capacity/load weighting.
+message NodeStats {
+  int64 total_bytes = 1;
+  int64 used_bytes = 2;
+  int64 available_bytes = 3;
+  int64 chunk_count = 4;
+  int32 active_requests = 5;
+}
+
+// NodeInfo is the coordinator's view of a storage node.
+message NodeInfo {
+  string node_id = 1;
+  string grpc_address = 2;
+  NodeHealth health = 3;
+  NodeStats stats = 4;
+  google.protobuf.Timestamp last_heartbeat_at = 5;
+  google.protobuf.Timestamp registered_at = 6;
+}
+
+// ChunkPlacement is a chunk plus the nodes that (should) hold its replicas.
+message ChunkPlacement {
+  string chunk_id = 1;
+  int32 chunk_index = 2;
+  int64 size_bytes = 3;
+  string checksum_sha256 = 4;
+  repeated NodeInfo nodes = 5;
+}

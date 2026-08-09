@@ -1,0 +1,207 @@
+# FlexStore development cluster.
+#
+#   1 gateway, 1 coordinator, 5 storage nodes, PostgreSQL, Redis.
+#
+# All five storage nodes run the SAME image with different configuration and
+# their own volume -- that is the point of the exercise, and it is also how a
+# real deployment would look.
+
+name: flexstore
+
+# Shared by all five storage nodes. Note there is no `build:` here: Compose
+# cannot build the same image tag from five services concurrently (they race on
+# the export step), so storage-node-1 owns the build and the other four just
+# reference the resulting image.
+x-storage-node: &storage-node
+  image: flexstore/storage-node:dev
+  restart: unless-stopped
+  depends_on:
+    coordinator:
+      condition: service_healthy
+  environment: &storage-node-env
+    FLEXSTORE_GRPC_ADDR: "0.0.0.0:9100"
+    FLEXSTORE_METRICS_ADDR: "0.0.0.0:9103"
+    FLEXSTORE_DATA_DIR: "/data"
+    FLEXSTORE_COORDINATOR_ADDR: "coordinator:9090"
+    FLEXSTORE_HEARTBEAT_INTERVAL: "${FLEXSTORE_HEARTBEAT_INTERVAL:-5s}"
+    # Each node advertises a modest quota rather than the shared host disk, so
+    # capacity-aware placement has something meaningful to balance across.
+    FLEXSTORE_NODE_CAPACITY_BYTES: "${FLEXSTORE_NODE_CAPACITY_BYTES:-10GiB}"
+    FLEXSTORE_LOG_LEVEL: "${FLEXSTORE_LOG_LEVEL:-info}"
+    FLEXSTORE_LOG_FORMAT: "${FLEXSTORE_LOG_FORMAT:-json}"
+  healthcheck:
+    test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9103/readyz"]
+    interval: 10s
+    timeout: 3s
+    retries: 5
+    start_period: 15s
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-flexstore}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-flexstore}"
+      POSTGRES_DB: "${POSTGRES_DB:-flexstore}"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      # Loopback-only. These are debugging conveniences, not services: a
+      # 0.0.0.0 bind puts an unauthenticated-by-default datastore on every
+      # interface the host has, including a coffee-shop Wi-Fi network.
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-flexstore} -d ${POSTGRES_DB:-flexstore}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # No persistence: Redis holds only caches and short-lived locks here, and
+    # pretending otherwise would blur the durability story.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6380}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  coordinator:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        SERVICE: coordinator
+    image: flexstore/coordinator:dev
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      FLEXSTORE_GRPC_ADDR: "0.0.0.0:9090"
+      FLEXSTORE_METRICS_ADDR: "0.0.0.0:9102"
+      FLEXSTORE_POSTGRES_DSN: "postgres://${POSTGRES_USER:-flexstore}:${POSTGRES_PASSWORD:-flexstore}@postgres:5432/${POSTGRES_DB:-flexstore}?sslmode=disable"
+      FLEXSTORE_REDIS_ADDR: "redis:6379"
+      FLEXSTORE_REPLICATION_FACTOR: "${FLEXSTORE_REPLICATION_FACTOR:-3}"
+      FLEXSTORE_MIN_WRITE_REPLICAS: "${FLEXSTORE_MIN_WRITE_REPLICAS:-2}"
+      FLEXSTORE_CHUNK_SIZE: "${FLEXSTORE_CHUNK_SIZE:-8MiB}"
+      FLEXSTORE_HEARTBEAT_INTERVAL: "${FLEXSTORE_HEARTBEAT_INTERVAL:-5s}"
+      FLEXSTORE_SUSPECT_TIMEOUT: "${FLEXSTORE_SUSPECT_TIMEOUT:-15s}"
+      FLEXSTORE_DEAD_TIMEOUT: "${FLEXSTORE_DEAD_TIMEOUT:-45s}"
+      FLEXSTORE_GC_INTERVAL: "${FLEXSTORE_GC_INTERVAL:-20s}"
+      FLEXSTORE_PLACEMENT_STRATEGY: "${FLEXSTORE_PLACEMENT_STRATEGY:-weighted}"
+      FLEXSTORE_REPAIR_ENABLED: "${FLEXSTORE_REPAIR_ENABLED:-true}"
+      FLEXSTORE_REPAIR_WORKERS: "${FLEXSTORE_REPAIR_WORKERS:-4}"
+      FLEXSTORE_REPAIR_MAX_PER_NODE: "${FLEXSTORE_REPAIR_MAX_PER_NODE:-2}"
+      FLEXSTORE_REPAIR_SCAN_INTERVAL: "${FLEXSTORE_REPAIR_SCAN_INTERVAL:-5s}"
+      FLEXSTORE_RECONCILE_ENABLED: "${FLEXSTORE_RECONCILE_ENABLED:-true}"
+      FLEXSTORE_RECONCILE_INTERVAL: "${FLEXSTORE_RECONCILE_INTERVAL:-5s}"
+      FLEXSTORE_RECONCILE_VERIFY_CHECKSUMS: "${FLEXSTORE_RECONCILE_VERIFY_CHECKSUMS:-true}"
+      FLEXSTORE_LOG_LEVEL: "${FLEXSTORE_LOG_LEVEL:-info}"
+      FLEXSTORE_LOG_FORMAT: "${FLEXSTORE_LOG_FORMAT:-json}"
+    ports:
+      # The coordinator gRPC port has no authentication: anything that can
+      # reach it can register itself as a storage node. Loopback only.
+      - "127.0.0.1:${COORDINATOR_GRPC_PORT:-9090}:9090"
+      - "127.0.0.1:${COORDINATOR_METRICS_PORT:-9102}:9102"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9102/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+
+  gateway:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        SERVICE: gateway
+    image: flexstore/gateway:dev
+    restart: unless-stopped
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    environment:
+      FLEXSTORE_HTTP_ADDR: "0.0.0.0:8080"
+      FLEXSTORE_METRICS_ADDR: "0.0.0.0:9101"
+      FLEXSTORE_COORDINATOR_ADDR: "coordinator:9090"
+      FLEXSTORE_CHUNK_SIZE: "${FLEXSTORE_CHUNK_SIZE:-8MiB}"
+      FLEXSTORE_LOG_LEVEL: "${FLEXSTORE_LOG_LEVEL:-info}"
+      FLEXSTORE_LOG_FORMAT: "${FLEXSTORE_LOG_FORMAT:-json}"
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+      - "127.0.0.1:${GATEWAY_METRICS_PORT:-9101}:9101"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9101/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
+  # storage-node-1 owns the build of the shared storage-node image; nodes 2-5
+  # reuse it. All five run the identical binary with different configuration.
+  storage-node-1:
+    <<: *storage-node
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        SERVICE: storage-node
+    environment:
+      <<: *storage-node-env
+      FLEXSTORE_NODE_ID: "storage-node-1"
+      FLEXSTORE_ADVERTISE_ADDR: "storage-node-1:9100"
+    volumes:
+      - storage-node-1-data:/data
+
+  storage-node-2:
+    <<: *storage-node
+    environment:
+      <<: *storage-node-env
+      FLEXSTORE_NODE_ID: "storage-node-2"
+      FLEXSTORE_ADVERTISE_ADDR: "storage-node-2:9100"
+    volumes:
+      - storage-node-2-data:/data
+
+  storage-node-3:
+    <<: *storage-node
+    environment:
+      <<: *storage-node-env
+      FLEXSTORE_NODE_ID: "storage-node-3"
+      FLEXSTORE_ADVERTISE_ADDR: "storage-node-3:9100"
+    volumes:
+      - storage-node-3-data:/data
+
+  storage-node-4:
+    <<: *storage-node
+    environment:
+      <<: *storage-node-env
+      FLEXSTORE_NODE_ID: "storage-node-4"
+      FLEXSTORE_ADVERTISE_ADDR: "storage-node-4:9100"
+    volumes:
+      - storage-node-4-data:/data
+
+  storage-node-5:
+    <<: *storage-node
+    environment:
+      <<: *storage-node-env
+      FLEXSTORE_NODE_ID: "storage-node-5"
+      FLEXSTORE_ADVERTISE_ADDR: "storage-node-5:9100"
+    volumes:
+      - storage-node-5-data:/data
+
+volumes:
+  postgres-data:
+  storage-node-1-data:
+  storage-node-2-data:
+  storage-node-3-data:
+  storage-node-4-data:
+  storage-node-5-data:

@@ -1,0 +1,19 @@
+# Keep the build context small: the Dockerfile only needs Go sources, go.mod
+# and the embedded migrations. Everything below either bloats the context or
+# invalidates the layer cache on every unrelated change.
+.git
+.github
+bin/
+dist/
+benchmarks/results/
+benchmarks/profiles/
+docs/
+deploy/grafana
+deploy/prometheus
+infra/
+*.md
+*.out
+*.test
+*.prof
+.env
+.DS_Store

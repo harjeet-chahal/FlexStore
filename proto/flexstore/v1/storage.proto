@@ -1,0 +1,135 @@
+syntax = "proto3";
+
+package flexstore.v1;
+
+import "flexstore/v1/common.proto";
+
+option go_package = "github.com/harjeetschahal/flexstore/gen/flexstorev1;flexstorev1";
+
+// StorageNodeService is the internal data-plane API. It is never exposed to
+// end clients; only the gateway (writes/reads) and the coordinator
+// (deletes/verification/repair) call it.
+service StorageNodeService {
+  // StoreChunk writes one chunk. The first message MUST be a header; every
+  // subsequent message MUST be a data frame. The node writes to a temp file,
+  // fsyncs, verifies the SHA-256 against the header, and only then renames it
+  // into its final path -- a partially written chunk is never visible.
+  rpc StoreChunk(stream StoreChunkRequest) returns (StoreChunkResponse);
+
+  // ReadChunk streams a chunk back. The node re-hashes while streaming and
+  // fails the stream (FailedPrecondition) if the on-disk bytes no longer match
+  // the recorded checksum.
+  rpc ReadChunk(ReadChunkRequest) returns (stream ReadChunkResponse);
+
+  rpc DeleteChunk(DeleteChunkRequest) returns (DeleteChunkResponse);
+
+  // ReplicateChunk has *pull* semantics: the receiving node fetches the chunk
+  // from source_address. This keeps re-replication work on the node that gains
+  // the replica rather than on the coordinator.
+  rpc ReplicateChunk(ReplicateChunkRequest) returns (ReplicateChunkResponse);
+
+  // CheckChunk reports presence and, optionally, a full checksum verification.
+  rpc CheckChunk(CheckChunkRequest) returns (CheckChunkResponse);
+
+  rpc GetNodeStats(GetNodeStatsRequest) returns (GetNodeStatsResponse);
+
+  // ListChunks streams every chunk ID this node currently holds. It is the
+  // input to reconciliation: comparing a returning node's actual inventory
+  // against the coordinator's metadata is the only way to find orphans (files
+  // for objects deleted while the node was down) and phantoms (replicas the
+  // metadata claims but the disk does not have).
+  //
+  // Streamed rather than paged because a node may hold millions of chunks and
+  // the reconciler consumes them incrementally.
+  rpc ListChunks(ListChunksRequest) returns (stream ListChunksResponse);
+}
+
+message ChunkHeader {
+  string chunk_id = 1;
+  // Expected total payload size in bytes. Used to reject truncated streams.
+  int64 size_bytes = 2;
+  // Lowercase hex SHA-256 the node must observe after writing.
+  string checksum_sha256 = 3;
+}
+
+message StoreChunkRequest {
+  oneof payload {
+    ChunkHeader header = 1;
+    bytes data = 2;
+  }
+}
+
+message StoreChunkResponse {
+  string chunk_id = 1;
+  int64 bytes_written = 2;
+  string checksum_sha256 = 3;
+  // True when the chunk already existed with a matching checksum; the write
+  // was a no-op. Makes StoreChunk idempotent so gateway retries are safe.
+  bool already_existed = 4;
+}
+
+message ReadChunkRequest {
+  string chunk_id = 1;
+  // Optional. When set, the node verifies against this instead of trusting its
+  // own sidecar metadata, which catches sidecar corruption too.
+  string expected_checksum_sha256 = 2;
+}
+
+message ReadChunkResponse {
+  bytes data = 1;
+}
+
+message DeleteChunkRequest {
+  string chunk_id = 1;
+}
+
+message DeleteChunkResponse {
+  bool existed = 1;
+}
+
+message ReplicateChunkRequest {
+  string chunk_id = 1;
+  string source_address = 2;
+  string checksum_sha256 = 3;
+  int64 size_bytes = 4;
+}
+
+message ReplicateChunkResponse {
+  int64 bytes_written = 1;
+  bool already_existed = 2;
+}
+
+message CheckChunkRequest {
+  string chunk_id = 1;
+  // When true the node reads the whole chunk and recomputes its SHA-256.
+  bool verify_checksum = 2;
+}
+
+message CheckChunkResponse {
+  bool exists = 1;
+  int64 size_bytes = 2;
+  string checksum_sha256 = 3;
+  bool checksum_valid = 4;
+}
+
+message GetNodeStatsRequest {}
+
+message GetNodeStatsResponse {
+  string node_id = 1;
+  NodeStats stats = 2;
+}
+
+message ListChunksRequest {
+  // Maximum entries per stream message. 0 means the node's default.
+  int32 batch_size = 1;
+}
+
+message ChunkInventoryEntry {
+  string chunk_id = 1;
+  int64 size_bytes = 2;
+  int64 modified_unix_nano = 3;
+}
+
+message ListChunksResponse {
+  repeated ChunkInventoryEntry chunks = 1;
+}

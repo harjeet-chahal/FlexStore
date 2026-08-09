@@ -1,0 +1,360 @@
+syntax = "proto3";
+
+package flexstore.v1;
+
+import "flexstore/v1/common.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/harjeetschahal/flexstore/gen/flexstorev1;flexstorev1";
+
+// CoordinatorService is the control plane. It owns all metadata and never
+// touches object bytes -- the gateway talks to storage nodes directly for
+// payloads, so the coordinator is not a data-path bottleneck.
+service CoordinatorService {
+  // ---- Node lifecycle ----
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
+
+  // ---- Single-request upload path ----
+  rpc BeginUpload(BeginUploadRequest) returns (BeginUploadResponse);
+  // AllocateChunk mints a stable chunk ID and runs the placement engine.
+  rpc AllocateChunk(AllocateChunkRequest) returns (AllocateChunkResponse);
+  // CommitChunk records which replicas actually landed. It fails if the
+  // durability policy (min_write_replicas) was not met.
+  rpc CommitChunk(CommitChunkRequest) returns (CommitChunkResponse);
+  rpc CompleteUpload(CompleteUploadRequest) returns (CompleteUploadResponse);
+  rpc AbortUpload(AbortUploadRequest) returns (AbortUploadResponse);
+
+  // ---- Read path ----
+  rpc GetObject(GetObjectRequest) returns (GetObjectResponse);
+  rpc HeadObject(HeadObjectRequest) returns (HeadObjectResponse);
+  rpc DeleteObject(DeleteObjectRequest) returns (DeleteObjectResponse);
+  rpc ListObjects(ListObjectsRequest) returns (ListObjectsResponse);
+
+  // ---- Multipart ----
+  rpc CreateMultipartUpload(CreateMultipartUploadRequest) returns (CreateMultipartUploadResponse);
+  rpc BeginPart(BeginPartRequest) returns (BeginPartResponse);
+  rpc CompletePart(CompletePartRequest) returns (CompletePartResponse);
+  rpc CompleteMultipartUpload(CompleteMultipartUploadRequest) returns (CompleteMultipartUploadResponse);
+  rpc AbortMultipartUpload(AbortMultipartUploadRequest) returns (AbortMultipartUploadResponse);
+
+  // ---- Durability / self-healing ----
+  // ReportCorruptReplica is called by the gateway when a replica fails
+  // SHA-256 verification on read. Routing the report through the control
+  // plane is what turns "this read failed over" into "this replica gets
+  // replaced": the coordinator demotes the replica, which makes the chunk
+  // under-replicated, which enqueues a repair job.
+  rpc ReportCorruptReplica(ReportCorruptReplicaRequest) returns (ReportCorruptReplicaResponse);
+  rpc GetReplicationStatus(GetReplicationStatusRequest) returns (GetReplicationStatusResponse);
+  // TriggerReconcile schedules an inventory comparison against a node. Runs
+  // automatically when a node rejoins; exposed for operators and tests.
+  rpc TriggerReconcile(TriggerReconcileRequest) returns (TriggerReconcileResponse);
+
+  // ---- Introspection (used by tests, ops and the /admin endpoints) ----
+  rpc GetClusterStatus(GetClusterStatusRequest) returns (GetClusterStatusResponse);
+  rpc GetObjectLayout(GetObjectLayoutRequest) returns (GetObjectLayoutResponse);
+}
+
+message RegisterNodeRequest {
+  string node_id = 1;
+  string grpc_address = 2;
+  NodeStats stats = 3;
+}
+
+message RegisterNodeResponse {
+  // Interval the node should heartbeat at, so cluster-wide cadence is a
+  // coordinator-side decision rather than per-node config drift.
+  int64 heartbeat_interval_ms = 1;
+}
+
+message HeartbeatRequest {
+  string node_id = 1;
+  string grpc_address = 2;
+  NodeStats stats = 3;
+}
+
+message HeartbeatResponse {
+  int64 heartbeat_interval_ms = 1;
+  // Set when the coordinator has no record of the node (e.g. metadata was
+  // reset); the node re-registers instead of silently going missing.
+  bool must_reregister = 2;
+}
+
+message ListNodesRequest {
+  bool healthy_only = 1;
+}
+
+message ListNodesResponse {
+  repeated NodeInfo nodes = 1;
+}
+
+message BeginUploadRequest {
+  string bucket = 1;
+  string key = 2;
+  string content_type = 3;
+  int64 chunk_size = 4;
+}
+
+message BeginUploadResponse {
+  string object_id = 1;
+  int64 chunk_size = 2;
+  int32 replication_factor = 3;
+  int32 min_write_replicas = 4;
+}
+
+message AllocateChunkRequest {
+  // Exactly one of object_id / part_id identifies the owner of this chunk.
+  string object_id = 1;
+  string part_id = 2;
+  int32 chunk_index = 3;
+  int64 size_bytes = 4;
+}
+
+message AllocateChunkResponse {
+  string chunk_id = 1;
+  repeated NodeInfo targets = 2;
+  int32 min_write_replicas = 3;
+}
+
+message CommitChunkRequest {
+  string chunk_id = 1;
+  string checksum_sha256 = 2;
+  int64 size_bytes = 3;
+  // Nodes that acknowledged a durable write.
+  repeated string succeeded_node_ids = 4;
+  // Nodes that were selected but failed; recorded as UNAVAILABLE replicas so
+  // the repair milestone has something to act on.
+  repeated string failed_node_ids = 5;
+}
+
+message CommitChunkResponse {
+  int32 available_replicas = 1;
+}
+
+message CompleteUploadRequest {
+  string object_id = 1;
+  int64 size_bytes = 2;
+  int32 chunk_count = 3;
+  string etag = 4;
+}
+
+message CompleteUploadResponse {
+  string object_id = 1;
+  string etag = 2;
+  google.protobuf.Timestamp completed_at = 3;
+}
+
+message AbortUploadRequest {
+  string object_id = 1;
+  string reason = 2;
+}
+
+message AbortUploadResponse {}
+
+message GetObjectRequest {
+  string bucket = 1;
+  string key = 2;
+}
+
+message ObjectInfo {
+  string object_id = 1;
+  string bucket = 2;
+  string key = 3;
+  int64 version = 4;
+  ObjectState state = 5;
+  int64 size_bytes = 6;
+  int64 chunk_size = 7;
+  int32 chunk_count = 8;
+  string etag = 9;
+  string content_type = 10;
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp completed_at = 12;
+}
+
+message GetObjectResponse {
+  ObjectInfo object = 1;
+  // Ordered by chunk_index. Each entry carries every currently-available
+  // replica location so the gateway can fail over without another round trip.
+  repeated ChunkPlacement chunks = 2;
+}
+
+message HeadObjectRequest {
+  string bucket = 1;
+  string key = 2;
+}
+
+message HeadObjectResponse {
+  ObjectInfo object = 1;
+}
+
+message DeleteObjectRequest {
+  string bucket = 1;
+  string key = 2;
+}
+
+message DeleteObjectResponse {
+  bool existed = 1;
+  string object_id = 2;
+}
+
+message ListObjectsRequest {
+  string bucket = 1;
+  string prefix = 2;
+  int32 limit = 3;
+  string start_after = 4;
+}
+
+message ListObjectsResponse {
+  repeated ObjectInfo objects = 1;
+  bool truncated = 2;
+}
+
+message CreateMultipartUploadRequest {
+  string bucket = 1;
+  string key = 2;
+  string content_type = 3;
+  int64 chunk_size = 4;
+}
+
+message CreateMultipartUploadResponse {
+  string upload_id = 1;
+  int64 chunk_size = 2;
+}
+
+message BeginPartRequest {
+  string upload_id = 1;
+  int32 part_number = 2;
+}
+
+message BeginPartResponse {
+  string part_id = 1;
+  int64 chunk_size = 2;
+}
+
+message CompletePartRequest {
+  string part_id = 1;
+  int64 size_bytes = 2;
+  int32 chunk_count = 3;
+  string etag = 4;
+}
+
+message CompletePartResponse {
+  string etag = 1;
+}
+
+message CompletedPart {
+  int32 part_number = 1;
+  string etag = 2;
+}
+
+message CompleteMultipartUploadRequest {
+  string upload_id = 1;
+  // Optional client-supplied manifest. When present it must match the parts
+  // the coordinator recorded, mirroring S3's CompleteMultipartUpload contract.
+  repeated CompletedPart parts = 2;
+}
+
+message CompleteMultipartUploadResponse {
+  string object_id = 1;
+  string etag = 2;
+  int64 size_bytes = 3;
+}
+
+message AbortMultipartUploadRequest {
+  string upload_id = 1;
+}
+
+message AbortMultipartUploadResponse {}
+
+message ReportCorruptReplicaRequest {
+  string chunk_id = 1;
+  string node_id = 2;
+  // Free-text detail from the detector, recorded for operators.
+  string detail = 3;
+}
+
+message ReportCorruptReplicaResponse {
+  // Replicas still considered good after the report. Zero means the chunk is
+  // currently unreadable and needs operator attention.
+  int32 remaining_available_replicas = 1;
+  bool repair_scheduled = 2;
+}
+
+message GetReplicationStatusRequest {
+  // Maximum recent jobs to include. 0 uses the server default.
+  int32 recent_job_limit = 1;
+}
+
+message RepairJobInfo {
+  int64 id = 1;
+  string chunk_id = 2;
+  RepairJobState state = 3;
+  string source_node_id = 4;
+  string target_node_id = 5;
+  int32 attempts = 6;
+  string last_error = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+}
+
+message GetReplicationStatusResponse {
+  int32 replication_factor = 1;
+  int64 total_chunks = 2;
+  int64 under_replicated_chunks = 3;
+  // Committed chunks with zero usable replicas: data is currently unreadable.
+  int64 unavailable_chunks = 4;
+  int64 jobs_pending = 5;
+  int64 jobs_running = 6;
+  int64 jobs_failed = 7;
+  int64 jobs_succeeded_total = 8;
+  repeated RepairJobInfo recent_jobs = 9;
+  bool repair_enabled = 10;
+}
+
+message TriggerReconcileRequest {
+  // Empty means every registered node.
+  string node_id = 1;
+}
+
+message TriggerReconcileResponse {
+  repeated string scheduled_node_ids = 1;
+}
+
+message GetClusterStatusRequest {}
+
+message GetClusterStatusResponse {
+  repeated NodeInfo nodes = 1;
+  int64 total_objects = 2;
+  int64 total_chunks = 3;
+  int64 under_replicated_chunks = 4;
+  int32 replication_factor = 5;
+  int64 unavailable_chunks = 6;
+  int64 repair_jobs_pending = 7;
+  int64 repair_jobs_running = 8;
+}
+
+message GetObjectLayoutRequest {
+  string bucket = 1;
+  string key = 2;
+}
+
+message GetObjectLayoutResponse {
+  ObjectInfo object = 1;
+  repeated ChunkLayout chunks = 2;
+}
+
+message ChunkLayout {
+  string chunk_id = 1;
+  int32 chunk_index = 2;
+  int64 size_bytes = 3;
+  string checksum_sha256 = 4;
+  repeated ReplicaLocation replicas = 5;
+}
+
+message ReplicaLocation {
+  string node_id = 1;
+  string grpc_address = 2;
+  ReplicaState state = 3;
+  NodeHealth node_health = 4;
+}

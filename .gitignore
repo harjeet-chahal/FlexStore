@@ -1,0 +1,13 @@
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+.env
+.DS_Store
+/tmp/
+
+# Benchmark output. The harness regenerates these on demand; the small curated
+# result set under benchmarks/results/published/ is committed deliberately.
+/benchmarks/results/*.json
+!/benchmarks/results/published/

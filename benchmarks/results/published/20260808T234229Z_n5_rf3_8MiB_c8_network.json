@@ -1,0 +1,146 @@
+{
+  "schema": "flexstore.bench/v1",
+  "label": "nodes=5 rf=3",
+  "timestamp": "2026-08-08T23:42:36Z",
+  "git_commit": "7ee4f2ec6fa15d8e6e0a2f4eeda9a6340fa90b6b",
+  "git_dirty": true,
+  "gateway": "http://gateway:8080",
+  "machine": {
+    "os": "linux",
+    "arch": "arm64",
+    "num_cpu": 12,
+    "cpu_model": "Apple M4 Pro",
+    "memory_bytes": 25769803776,
+    "os_version": "macOS 26.6",
+    "docker_version": "Docker version 28.4.0, build d8eb465",
+    "go_version": "go1.25.12",
+    "client_location": "compose-network"
+  },
+  "cluster": {
+    "replication_factor": 3,
+    "healthy_nodes": 5,
+    "total_nodes": 5,
+    "chunk_size_bytes": 8388608,
+    "nodes_before": [
+      {
+        "node_id": "storage-node-1",
+        "health": "HEALTHY",
+        "used_bytes": 68111936,
+        "total_bytes": 10737418240,
+        "chunk_count": 15
+      },
+      {
+        "node_id": "storage-node-2",
+        "health": "HEALTHY",
+        "used_bytes": 0,
+        "total_bytes": 10737418240,
+        "chunk_count": 0
+      },
+      {
+        "node_id": "storage-node-3",
+        "health": "HEALTHY",
+        "used_bytes": 0,
+        "total_bytes": 10737418240,
+        "chunk_count": 0
+      },
+      {
+        "node_id": "storage-node-4",
+        "health": "HEALTHY",
+        "used_bytes": 0,
+        "total_bytes": 10737418240,
+        "chunk_count": 0
+      },
+      {
+        "node_id": "storage-node-5",
+        "health": "HEALTHY",
+        "used_bytes": 0,
+        "total_bytes": 10737418240,
+        "chunk_count": 0
+      }
+    ],
+    "nodes_after": [
+      {
+        "node_id": "storage-node-1",
+        "health": "HEALTHY",
+        "used_bytes": 68111936,
+        "total_bytes": 10737418240,
+        "chunk_count": 15
+      },
+      {
+        "node_id": "storage-node-2",
+        "health": "HEALTHY",
+        "used_bytes": 310378496,
+        "total_bytes": 10737418240,
+        "chunk_count": 37
+      },
+      {
+        "node_id": "storage-node-3",
+        "health": "HEALTHY",
+        "used_bytes": 0,
+        "total_bytes": 10737418240,
+        "chunk_count": 0
+      },
+      {
+        "node_id": "storage-node-4",
+        "health": "HEALTHY",
+        "used_bytes": 0,
+        "total_bytes": 10737418240,
+        "chunk_count": 0
+      },
+      {
+        "node_id": "storage-node-5",
+        "health": "HEALTHY",
+        "used_bytes": 226492416,
+        "total_bytes": 10737418240,
+        "chunk_count": 27
+      }
+    ],
+    "under_replicated_chunks_after": 0,
+    "unavailable_chunks_after": 0
+  },
+  "workload": {
+    "object_size_bytes": 8388608,
+    "object_size_label": "8MiB",
+    "concurrency": 8,
+    "operations": 80,
+    "warmup_ops": 8,
+    "bucket": "bench-bucket"
+  },
+  "upload": {
+    "ops": 80,
+    "errors": 0,
+    "bytes": 671088640,
+    "wall_seconds": 1.212526084,
+    "throughput_mib_s": 527.8236966983054,
+    "ops_per_second": 65.97796208728818,
+    "latency": {
+      "min_ms": 97.246833,
+      "p50_ms": 117.868417,
+      "p90_ms": 139.8995,
+      "p95_ms": 173.114833,
+      "p99_ms": 175.90675,
+      "max_ms": 175.90675,
+      "mean_ms": 121.24133074999995
+    },
+    "latency_samples": 80
+  },
+  "download": {
+    "ops": 80,
+    "errors": 0,
+    "bytes": 671088640,
+    "wall_seconds": 0.239441042,
+    "throughput_mib_s": 2672.8918094166997,
+    "ops_per_second": 334.11147617708747,
+    "latency": {
+      "min_ms": 9.460958,
+      "p50_ms": 21.46125,
+      "p90_ms": 33.861875,
+      "p95_ms": 39.50075,
+      "p99_ms": 42.804667,
+      "max_ms": 42.804667,
+      "mean_ms": 23.345429675
+    },
+    "latency_samples": 80
+  },
+  "verified_sha256": true
+}
